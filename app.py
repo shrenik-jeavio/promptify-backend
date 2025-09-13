@@ -21,6 +21,31 @@ def create_app(config_class=Config):
     migrate.init_app(app, db)
     app.register_blueprint(api_bp)
 
+    @app.cli.command("seed")
+    def seed():
+        """Seeds the database with initial users."""
+        from database import User
+        users = [
+            {'username': 'john.doe', 'password': 'password123', 'email': 'john.doe@promptify.com', 'gender': 'male'},
+            {'username': 'sally.smith', 'password': 'password123', 'email': 'sally.smith@promptify.com', 'gender': 'female'},
+            {'username': 'richie.rich', 'password': 'password123', 'email': 'richie.rich@promptify.com', 'gender': 'male'},
+            {'username': 'bob.rose', 'password': 'password123', 'email': 'bob.rose@promptify.com', 'gender': 'male'},
+            {'username': 'amanda.brown', 'password': 'password123', 'email': 'amanda.brown@promptify.com', 'gender': 'female'},
+        ]
+
+        for user_data in users:
+            if not User.query.filter_by(username=user_data['username']).first():
+                user = User(
+                    username=user_data['username'],
+                    email=user_data['email'],
+                    gender=user_data['gender']
+                )
+                user.set_password(user_data['password'])
+                db.session.add(user)
+        
+        db.session.commit()
+        print("Database seeded with initial users.")
+
     return app
 
 app = create_app()
