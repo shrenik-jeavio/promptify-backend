@@ -23,14 +23,18 @@ class Prompt(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     title = db.Column(db.String(255), default='', nullable=False)
     text = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     intended_use = db.Column(db.String(200))
     target_audience = db.Column(db.String(200))
     expected_outcome = db.Column(db.String(200))
     tags = db.Column(db.String(200)) # Simple comma-separated string for now
     is_shared = db.Column(db.Boolean, default=False, nullable=False)
     generated_prompts = db.relationship('GeneratedPrompt', backref='prompt', lazy=True, cascade="all, delete-orphan")
+    votes = db.relationship('PromptVote', backref='prompt', lazy=True, cascade="all, delete-orphan")
 
     def to_dict(self):
+        upvotes = sum(1 for v in self.votes if v.vote == 1)
+        downvotes = sum(1 for v in self.votes if v.vote == -1)
         return {
             'id': self.id,
             'author': self.author.username,
@@ -41,7 +45,18 @@ class Prompt(db.Model):
             'expected_outcome': self.expected_outcome,
             'tags': self.tags,
             'is_shared': self.is_shared,
+            'created_at': self.created_at.isoformat(),
+            'upvotes': upvotes,
+            'downvotes': downvotes
         }
+
+class PromptVote(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    prompt_id = db.Column(db.Integer, db.ForeignKey('prompt.id'), nullable=False)
+    vote = db.Column(db.Integer, nullable=False)  # 1 for upvote, -1 for downvote
+    __table_args__ = (db.UniqueConstraint('user_id', 'prompt_id', name='_user_prompt_uc'),)
+
 
 class GeneratedPrompt(db.Model):
     id = db.Column(db.Integer, primary_key=True)

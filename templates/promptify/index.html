@@ -1,0 +1,243 @@
+{% extends "layout.html" %}
+
+{% block title %}Dashboard - PromptCraft{% endblock %}
+
+{% block content %}
+<nav class="bg-gray-800 text-white p-4">
+    <div class="container mx-auto flex justify-between">
+        <div class="flex items-center">
+            <a href="/promptify" class="font-bold text-xl">PromptCraft</a>
+            <a href="/promptify/public" class="ml-6 text-gray-300 hover:text-white">Public Prompts</a>
+        </div>
+        <div>
+            <span id="username-display" class="mr-4"></span>
+            <button id="logout-button" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Logout</button>
+        </div>
+    </div>
+</nav>
+
+<div class="container mx-auto p-4">
+    <div class="bg-white shadow-md rounded p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-2xl font-bold">My Prompts</h2>
+            <button id="create-prompt-btn" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
+                Create Prompt
+            </button>
+        </div>
+        <div id="prompts-list"></div>
+    </div>
+</div>
+
+<!-- Generation Result Modal -->
+<div class="modal fade" id="generationResultModal" tabindex="-1" aria-labelledby="generationResultModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="generationResultModalLabel">Generation Result</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <pre id="generation-result-content"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Create Prompt Modal -->
+<div class="modal fade" id="createPromptModal" tabindex="-1" aria-labelledby="createPromptModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="createPromptModalLabel">Create New Prompt</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="create-prompt-form">
+          <div class="mb-3">
+            <label for="prompt-title" class="form-label">Title</label>
+            <input type="text" class="form-control" id="prompt-title" placeholder="A catchy title for your prompt">
+          </div>
+          <div class="mb-3">
+            <label for="prompt-text" class="form-label">Prompt Text</label>
+            <textarea class="form-control" id="prompt-text" rows="3" required placeholder="Enter your prompt text here..."></textarea>
+          </div>
+          <div class="mb-3">
+            <label for="prompt-tags" class="form-label">Tags</label>
+            <input type="text" class="form-control" id="prompt-tags" placeholder="Comma-separated tags, e.g., marketing,writing">
+          </div>
+            <button type="submit" class="btn btn-primary">Save Prompt</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/promptify/login';
+            return;
+        }
+
+        const user = JSON.parse(localStorage.getItem('user'));
+        document.getElementById('username-display').textContent = user.username;
+
+        fetchPrompts();
+
+        document.getElementById('logout-button').addEventListener('click', async function() {
+            try {
+                await fetch('/logout', {
+                    method: 'POST',
+                    headers: { 'x-access-token': token }
+                });
+            } finally {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/promptify/login';
+            }
+        });
+
+        const createPromptBtn = document.getElementById('create-prompt-btn');
+        const createPromptModal = new bootstrap.Modal(document.getElementById('createPromptModal'));
+        createPromptBtn.addEventListener('click', () => {
+            createPromptModal.show();
+        });
+
+        document.getElementById('create-prompt-form').addEventListener('submit', async function (event) {
+            event.preventDefault();
+            const token = localStorage.getItem('token');
+            const title = document.getElementById('prompt-title').value;
+            const text = document.getElementById('prompt-text').value;
+            const tags = document.getElementById('prompt-tags').value;
+
+            const response = await fetch('/prompts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-access-token': token
+                },
+                body: JSON.stringify({ title, text, tags })
+            });
+
+            if (response.ok) {
+                createPromptModal.hide();
+                fetchPrompts();
+                document.getElementById('create-prompt-form').reset();
+            } else {
+                alert('Failed to create prompt.');
+            }
+        });
+    });
+
+    async function fetchPrompts() {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/prompts', {
+            headers: { 'x-access-token': token }
+        });
+
+        if (response.status === 401) {
+            window.location.href = '/promptify/login';
+            return;
+        }
+
+        const prompts = await response.json();
+        const promptsList = document.getElementById('prompts-list');
+        promptsList.innerHTML = '';
+
+        if (prompts.length === 0) {
+            promptsList.innerHTML = '<p>No prompts found. Create one!</p>';
+            return;
+        }
+
+        prompts.forEach(prompt => {
+            const promptElement = document.createElement('div');
+            promptElement.className = 'border-b p-4 flex justify-between items-center';
+            promptElement.innerHTML = `
+                <div>
+                    <h3 class="font-bold">${prompt.title || 'Untitled'}</h3>
+                    <p class="text-gray-600">${prompt.text.substring(0, 100)}...</p>
+                    <div class="text-sm text-gray-500 mt-2">
+                        <span>Created: ${new Date(prompt.created_at).toLocaleString()}</span>
+                        <span class="ml-4">Shared: <span class="font-bold ${prompt.is_shared ? 'text-green-600' : 'text-red-600'}">${prompt.is_shared}</span></span>
+                    </div>
+                </div>
+                <div>
+                    <a href="/promptify/prompt/${prompt.id}" class="btn btn-sm btn-secondary me-2">View/Edit</a>
+                    <button class="btn btn-sm btn-success me-2" onclick="generatePrompt(${prompt.id}, this)">Generate</button>
+                    <button class="btn btn-sm ${prompt.is_shared ? 'btn-warning' : 'btn-info'} me-2" onclick="publishPrompt(${prompt.id}, ${!prompt.is_shared})">
+                        ${prompt.is_shared ? 'Unpublish' : 'Publish'}
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="deletePrompt(${prompt.id})">Delete</button>
+                </div>
+            `;
+            promptsList.appendChild(promptElement);
+        });
+    }
+
+    async function deletePrompt(promptId) {
+        if (!confirm('Are you sure you want to delete this prompt?')) {
+            return;
+        }
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/prompts/${promptId}`, {
+            method: 'DELETE',
+            headers: { 'x-access-token': token }
+        });
+        if (response.ok) {
+            fetchPrompts();
+        } else {
+            alert('Failed to delete prompt.');
+        }
+    }
+
+    async function generatePrompt(promptId, button) {
+        const token = localStorage.getItem('token');
+        const originalButtonText = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Generating...';
+
+        const resultModal = new bootstrap.Modal(document.getElementById('generationResultModal'));
+        
+        try {
+            const response = await fetch(`/prompts/${promptId}/generate`, {
+                method: 'POST',
+                headers: { 'x-access-token': token }
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                document.getElementById('generation-result-content').textContent = JSON.stringify(data, null, 2);
+                resultModal.show();
+            } else {
+                alert(data.error || 'Failed to generate content.');
+            }
+        } catch (error) {
+            alert('An error occurred while generating content.');
+        } finally {
+            button.disabled = false;
+            button.textContent = originalButtonText;
+        }
+    }
+
+    async function publishPrompt(promptId, publish) {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/prompts/${promptId}/publish`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-access-token': token
+            },
+            body: JSON.stringify({ is_shared: publish })
+        });
+        if (response.ok) {
+            fetchPrompts();
+        } else {
+            alert('Failed to update prompt status.');
+        }
+    }
+</script>
+{% endblock %}

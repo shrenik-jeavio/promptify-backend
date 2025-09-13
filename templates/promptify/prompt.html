@@ -1,0 +1,184 @@
+{% extends "layout.html" %}
+
+{% block title %}Prompt Details - PromptCraft{% endblock %}
+
+{% block content %}
+<nav class="bg-gray-800 text-white p-4">
+    <div class="container mx-auto flex justify-between">
+        <div class="flex items-center">
+            <a href="/promptify" class="font-bold text-xl">PromptCraft</a>
+            <a href="/promptify/public" class="ml-6 text-gray-300 hover:text-white">Public Prompts</a>
+        </div>
+        <div>
+            <span id="username-display" class="mr-4"></span>
+            <button id="logout-button" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Logout</button>
+        </div>
+    </div>
+</nav>
+
+<div class="container mx-auto p-4">
+    <div class="bg-white shadow-md rounded p-6">
+        <h2 class="text-2xl font-bold mb-4">Edit Prompt</h2>
+        <form id="edit-prompt-form">
+            <!-- Form fields will be populated by JavaScript -->
+        </form>
+    </div>
+
+    <div class="bg-white shadow-md rounded p-6 mt-6">
+        <h2 class="text-2xl font-bold mb-4">Generate Content</h2>
+        <button id="generate-btn" class="btn btn-success">Generate</button>
+        <div id="generation-result" class="mt-4 p-4 border bg-light rounded" style="display: none;"></div>
+    </div>
+
+    <div class="bg-white shadow-md rounded p-6 mt-6">
+        <h2 class="text-2xl font-bold mb-4">Generation History</h2>
+        <div id="history-list"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', async function() {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/promptify/login';
+            return;
+        }
+
+        const user = JSON.parse(localStorage.getItem('user'));
+        document.getElementById('username-display').textContent = user.username;
+
+        const promptId = window.location.pathname.split('/').pop();
+        
+        await fetchPromptDetails(promptId);
+
+        document.getElementById('logout-button').addEventListener('click', async function() {
+            try {
+                await fetch('/logout', {
+                    method: 'POST',
+                    headers: { 'x-access-token': token }
+                });
+            } finally {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/promptify/login';
+            }
+        });
+
+        document.getElementById('edit-prompt-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            updatePrompt(promptId);
+        });
+
+        document.getElementById('generate-btn').addEventListener('click', () => generateContent(promptId));
+        fetchHistory(promptId);
+    });
+
+    async function fetchPromptDetails(promptId) {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/prompts/${promptId}`, {
+            headers: { 'x-access-token': token }
+        });
+
+        if (response.status === 401) {
+            window.location.href = '/promptify/login';
+            return;
+        }
+        
+        const prompt = await response.json();
+        const form = document.getElementById('edit-prompt-form');
+        form.innerHTML = `
+            <div class="mb-3">
+                <label for="prompt-title" class="form-label">Title</label>
+                <input type="text" class="form-control" id="prompt-title" value="${prompt.title || ''}">
+            </div>
+            <div class="mb-3">
+                <label for="prompt-text" class="form-label">Prompt Text</label>
+                <textarea class="form-control" id="prompt-text" rows="5">${prompt.text}</textarea>
+            </div>
+            <div class="mb-3">
+                <label for="prompt-tags" class="form-label">Tags</label>
+                <input type="text" class="form-control" id="prompt-tags" value="${prompt.tags || ''}">
+            </div>
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+            <a href="/promptify" class="btn btn-secondary">Cancel</a>
+        `;
+    }
+
+    async function updatePrompt(promptId) {
+        const token = localStorage.getItem('token');
+        const title = document.getElementById('prompt-title').value;
+        const text = document.getElementById('prompt-text').value;
+        const tags = document.getElementById('prompt-tags').value;
+
+        const response = await fetch(`/prompts/${promptId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-access-token': token
+            },
+            body: JSON.stringify({ title, text, tags })
+        });
+
+        if (response.ok) {
+            window.location.href = '/promptify';
+        } else {
+            alert('Failed to update prompt.');
+        }
+    }
+
+    async function generateContent(promptId) {
+        const token = localStorage.getItem('token');
+        const generateBtn = document.getElementById('generate-btn');
+        const resultDiv = document.getElementById('generation-result');
+
+        generateBtn.disabled = true;
+        generateBtn.textContent = 'Generating...';
+        resultDiv.style.display = 'none';
+
+        const response = await fetch(`/prompts/${promptId}/generate`, {
+            method: 'POST',
+            headers: { 'x-access-token': token }
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            resultDiv.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            resultDiv.style.display = 'block';
+            fetchHistory(promptId); // Refresh history
+        } else {
+            alert(data.error || 'Failed to generate content.');
+        }
+
+        generateBtn.disabled = false;
+        generateBtn.textContent = 'Generate';
+    }
+
+    async function fetchHistory(promptId) {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/prompts/${promptId}/history`, {
+            headers: { 'x-access-token': token }
+        });
+        const history = await response.json();
+        const historyList = document.getElementById('history-list');
+        historyList.innerHTML = '';
+
+        if (history.length === 0) {
+            historyList.innerHTML = '<p>No generation history.</p>';
+            return;
+        }
+
+        history.forEach(item => {
+            const itemElement = document.createElement('div');
+            itemElement.className = 'border-b p-3';
+            itemElement.innerHTML = `
+                <p><strong>Generated Text:</strong> ${item.generated_text.substring(0, 200)}...</p>
+                <p class="text-sm text-gray-500">Score: ${item.analysis.overall_score}/10 | Generated at: ${new Date(item.created_at).toLocaleString()}</p>
+            `;
+            historyList.appendChild(itemElement);
+        });
+    }
+</script>
+{% endblock %}

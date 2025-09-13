@@ -2,7 +2,7 @@ import json
 import traceback
 from functools import wraps
 from flask import jsonify, request, Blueprint, current_app
-from database import db, Prompt, GeneratedPrompt, User, TokenBlacklist
+from database import db, Prompt, GeneratedPrompt, User, TokenBlacklist, PromptVote
 from services import model
 from logger import logger
 import jwt
@@ -50,7 +50,13 @@ def login():
         'jti': str(uuid.uuid4())
     }, current_app.config['SECRET_KEY'], algorithm="HS256")
 
-    return jsonify({'token': token})
+    return jsonify({
+        'token': token,
+        'user_id': user.id,
+        'username': user.username,
+        'email': user.email,
+        'gender': user.gender
+    })
 
 @api_bp.route('/logout', methods=['POST'])
 @auth_required
@@ -111,6 +117,7 @@ def update_prompt(current_user, prompt_id):
     if prompt.user_id != current_user.id:
         return jsonify({'message': 'Access forbidden!'}), 403
     data = request.get_json()
+    prompt.title = data.get('title', prompt.title)
     prompt.text = data.get('text', prompt.text)
     prompt.intended_use = data.get('intended_use', prompt.intended_use)
     prompt.target_audience = data.get('target_audience', prompt.target_audience)
@@ -132,10 +139,18 @@ def delete_prompt(current_user, prompt_id):
     logger.info(f"Prompt {prompt_id} deleted successfully.")
     return jsonify({'message': 'Prompt deleted successfully'})
 
-@api_bp.route('/prompts/private', methods=['GET'])
+@api_bp.route('/prompts', methods=['GET'])
 @auth_required
-def get_private_prompts(current_user):
-    prompts = Prompt.query.filter_by(is_shared=False, user_id=current_user.id).all()
+def get_prompts(current_user):
+    sort_order = request.args.get('sort', 'newest')
+    query = Prompt.query.filter_by(user_id=current_user.id)
+
+    if sort_order == 'newest':
+        query = query.order_by(Prompt.created_at.desc())
+    elif sort_order == 'oldest':
+        query = query.order_by(Prompt.created_at.asc())
+
+    prompts = query.all()
     return jsonify([prompt.to_dict() for prompt in prompts])
 
 @api_bp.route('/prompts/public', methods=['GET'])
@@ -270,3 +285,40 @@ def get_generation_history(current_user, prompt_id):
     history = [gen_prompt.to_dict() for gen_prompt in prompt.generated_prompts]
     logger.info(f"Fetched {len(history)} generated prompts for prompt {prompt_id}.")
     return jsonify(history)
+
+@api_bp.route('/prompts/<int:prompt_id>/vote', methods=['POST'])
+@auth_required
+def vote_on_prompt(current_user, prompt_id):
+    prompt = Prompt.query.get_or_404(prompt_id)
+
+    if not prompt.is_shared:
+        return jsonify({'message': 'This prompt is not shared publicly.'}), 403
+
+    if prompt.user_id == current_user.id:
+        return jsonify({'message': 'You cannot vote on your own prompt.'}), 403
+
+    data = request.get_json()
+    vote_value = data.get('vote')
+
+    if vote_value not in [1, -1, 0]:
+        return jsonify({'message': 'Invalid vote value. Use 1 for upvote, -1 for downvote, or 0 to remove vote.'}), 400
+
+    existing_vote = PromptVote.query.filter_by(user_id=current_user.id, prompt_id=prompt.id).first()
+
+    if existing_vote:
+        if vote_value == 0:
+            db.session.delete(existing_vote)
+            db.session.commit()
+            return jsonify({'message': 'Vote removed.'})
+        else:
+            existing_vote.vote = vote_value
+            db.session.commit()
+            return jsonify({'message': 'Vote updated.'})
+    else:
+        if vote_value != 0:
+            new_vote = PromptVote(user_id=current_user.id, prompt_id=prompt.id, vote=vote_value)
+            db.session.add(new_vote)
+            db.session.commit()
+            return jsonify({'message': 'Vote recorded.'}), 201
+        else:
+            return jsonify({'message': 'No vote to remove.'})

@@ -1,0 +1,106 @@
+{% extends "layout.html" %}
+
+{% block title %}Public Prompts - PromptCraft{% endblock %}
+
+{% block content %}
+<nav class="bg-gray-800 text-white p-4">
+    <div class="container mx-auto flex justify-between">
+        <div class="flex items-center">
+            <a href="/promptify" class="font-bold text-xl">PromptCraft</a>
+            <a href="/promptify/public" class="ml-6 text-gray-300 hover:text-white">Public Prompts</a>
+        </div>
+        <div>
+            <span id="username-display" class="mr-4"></span>
+            <button id="logout-button" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Logout</button>
+        </div>
+    </div>
+</nav>
+
+<div class="container mx-auto p-4">
+    <div class="bg-white shadow-md rounded p-6">
+        <h2 class="text-2xl font-bold mb-4">Public Prompts</h2>
+        <div class="mb-4">
+            <input type="text" id="search-bar" class="form-control" placeholder="Search by tags...">
+        </div>
+        <div id="public-prompts-list"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/promptify/login';
+            return;
+        }
+
+        const user = JSON.parse(localStorage.getItem('user'));
+        document.getElementById('username-display').textContent = user.username;
+        
+        fetchPublicPrompts();
+
+        document.getElementById('logout-button').addEventListener('click', async function() {
+            try {
+                await fetch('/logout', {
+                    method: 'POST',
+                    headers: { 'x-access-token': token }
+                });
+            } finally {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/promptify/login';
+            }
+        });
+
+        document.getElementById('search-bar').addEventListener('input', (e) => {
+            fetchPublicPrompts(e.target.value);
+        });
+    });
+
+    async function fetchPublicPrompts(searchTerm = '') {
+        const token = localStorage.getItem('token');
+        let url = '/prompts/public';
+        if (searchTerm) {
+            url = `/prompts/public/search?tags=${searchTerm}`;
+        }
+        
+        const response = await fetch(url, {
+            headers: { 'x-access-token': token }
+        });
+        
+        const prompts = await response.json();
+        const promptsList = document.getElementById('public-prompts-list');
+        promptsList.innerHTML = '';
+
+        prompts.forEach(prompt => {
+            const promptElement = document.createElement('div');
+            promptElement.className = 'border-b p-4';
+            promptElement.innerHTML = `
+                <h3 class="font-bold">${prompt.title}</h3>
+                <p class="text-sm text-gray-500">by ${prompt.author}</p>
+                <p class="text-gray-600 my-2">${prompt.text}</p>
+                <div>
+                    <button class="btn btn-sm btn-success" onclick="vote(${prompt.id}, 1)">Upvote (${prompt.upvotes})</button>
+                    <button class="btn btn-sm btn-danger" onclick="vote(${prompt.id}, -1)">Downvote (${prompt.downvotes})</button>
+                </div>
+            `;
+            promptsList.appendChild(promptElement);
+        });
+    }
+
+    async function vote(promptId, voteValue) {
+        const token = localStorage.getItem('token');
+        await fetch(`/prompts/${promptId}/vote`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-access-token': token
+            },
+            body: JSON.stringify({ vote: voteValue })
+        });
+        fetchPublicPrompts(document.getElementById('search-bar').value);
+    }
+</script>
+{% endblock %}

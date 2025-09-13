@@ -7,6 +7,7 @@ import uvicorn
 from config import Config
 from database import db
 from routes import api_bp
+from promptify import promptify_bp
 
 migrate = Migrate()
 
@@ -19,7 +20,8 @@ def create_app(config_class=Config):
 
     db.init_app(app)
     migrate.init_app(app, db)
-    app.register_blueprint(api_bp)
+    app.register_blueprint(api_bp, url_prefix='/')
+    app.register_blueprint(promptify_bp, url_prefix='/promptify')
 
     @app.cli.command("seed")
     def seed():
